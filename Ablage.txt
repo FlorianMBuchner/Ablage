@@ -1,0 +1,20 @@
+import time
+import board
+import busio
+
+from adafruit_pca9685 import PCA9685
+
+i2c = busio.I2C(board.SCL, board.SDA)
+
+pca = PCA9685(i2c, address=0x40)
+pca.frequency = 50
+
+try:
+    # Beispiel-PWM auf Kanal 0
+    pca.channels[0].duty_cycle = 0x1800
+    time.sleep(2)
+
+    pca.channels[0].duty_cycle = 0x3000
+    time.sleep(2)
+finally:
+    pca.deinit()
