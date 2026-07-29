@@ -1,85 +1,108 @@
 import time
+import board
 from smbus2 import SMBus
+from adafruit_pca9685 import PCA9685
+
+PCF8574_ADDRESS = 0x20
+PCF8574_BUS = 1
+
+NUMBER_OF_BUTTONS = 8
+HOLD_TIME = 0.5
+STEP_TIME = 0.15
+STEP_PERCENT = 5
+
+# PCA9685 initialisieren
+i2c = board.I2C()
+pca = PCA9685(i2c, address=0x40)
+pca.frequency = 1000
+
+# PCF8574 initialisieren
+pcf = SMBus(PCF8574_BUS)
+
+# Alle PCF8574-Pins auf HIGH setzen:
+# Dadurch können sie als Eingänge verwendet werden.
+pcf.write_byte(PCF8574_ADDRESS, 0xFF)
+
+# Für jeden Taster beziehungsweise Lichtkanal eigener Zustand
+brightness = [40] * NUMBER_OF_BUTTONS
+direction = [1] * NUMBER_OF_BUTTONS
+pressed_since = [None] * NUMBER_OF_BUTTONS
+last_step = [0.0] * NUMBER_OF_BUTTONS
 
 
-class PCA9685:
-    MODE1 = 0x00
-    MODE2 = 0x01
-    PRESCALE = 0xFE
-    LED0_ON_L = 0x06
+def set_brightness(channel, percent):
+    """Helligkeit eines PCA9685-Kanals einstellen."""
+    percent = max(0, min(100, percent))
+    duty_cycle = round(0xFFFF * percent / 100)
 
-    def __init__(self, bus_number=1, address=0x40):
-        self.address = address
-        self.bus = SMBus(bus_number)
+    pca.channels[channel].duty_cycle = duty_cycle
 
-        # Auto-Increment aktivieren
-        self.bus.write_byte_data(self.address, self.MODE1, 0x20)
 
-        # Totem-Pole-Ausgänge
-        self.bus.write_byte_data(self.address, self.MODE2, 0x04)
+def button_pressed(pcf_value, pin):
+    """True, wenn der active-low Taster gedrückt ist."""
+    return (pcf_value & (1 << pin)) == 0
+
+
+# Anfangshelligkeit einstellen
+for channel in range(NUMBER_OF_BUTTONS):
+    set_brightness(channel, brightness[channel])
+
+try:
+    while True:
+        now = time.monotonic()
+
+        # Alle acht Taster mit einem einzigen I²C-Lesezugriff einlesen
+        pcf_value = pcf.read_byte(PCF8574_ADDRESS)
+
+        for pin in range(NUMBER_OF_BUTTONS):
+            pressed = button_pressed(pcf_value, pin)
+
+            if pressed:
+                if pressed_since[pin] is None:
+                    # Taster wurde neu gedrückt
+                    pressed_since[pin] = now
+                    last_step[pin] = now
+
+                    # Bei einem neuen Haltevorgang zunächst heller
+                    direction[pin] = 1
+
+                elif (
+                    now - pressed_since[pin] >= HOLD_TIME
+                    and now - last_step[pin] >= STEP_TIME
+                ):
+                    brightness[pin] += direction[pin] * STEP_PERCENT
+
+                    if brightness[pin] >= 100:
+                        brightness[pin] = 100
+                        direction[pin] = -1
+
+                    elif brightness[pin] <= 0:
+                        brightness[pin] = 0
+                        direction[pin] = 1
+
+                    # Taster-Pin entspricht hier dem Lichtkanal
+                    set_brightness(pin, brightness[pin])
+
+                    print(
+                        f"Taster {pin}: "
+                        f"Helligkeit {brightness[pin]} %"
+                    )
+
+                    last_step[pin] = now
+
+            else:
+                # Taster wurde losgelassen
+                pressed_since[pin] = None
 
         time.sleep(0.01)
 
-    def set_frequency(self, frequency):
-        prescale = round(25_000_000 / (4096 * frequency)) - 1
-        prescale = max(3, min(255, prescale))
+except KeyboardInterrupt:
+    print("\nProgramm beendet")
 
-        old_mode = self.bus.read_byte_data(self.address, self.MODE1)
-        sleep_mode = (old_mode & 0x7F) | 0x10
-
-        self.bus.write_byte_data(self.address, self.MODE1, sleep_mode)
-        self.bus.write_byte_data(self.address, self.PRESCALE, prescale)
-        self.bus.write_byte_data(self.address, self.MODE1, old_mode)
-
-        time.sleep(0.005)
-
-        # Neustart und Auto-Increment
-        self.bus.write_byte_data(
-            self.address,
-            self.MODE1,
-            old_mode | 0xA0
-        )
-
-    def set_pwm(self, channel, on, off):
-        if not 0 <= channel <= 15:
-            raise ValueError("Kanal muss zwischen 0 und 15 liegen")
-
-        register = self.LED0_ON_L + 4 * channel
-
-        self.bus.write_i2c_block_data(
-            self.address,
-            register,
-            [
-                on & 0xFF,
-                (on >> 8) & 0x0F,
-                off & 0xFF,
-                (off >> 8) & 0x0F,
-            ],
-        )
-
-    def set_servo_us(self, channel, pulse_us, frequency=50):
-        period_us = 1_000_000 / frequency
-        ticks = round(pulse_us * 4096 / period_us)
-        ticks = max(0, min(4095, ticks))
-
-        self.set_pwm(channel, 0, ticks)
-
-    def close(self):
-        self.bus.close()
-
-
-pca = PCA9685(address=0x40)
-pca.set_frequency(50)
-
-try:
-    # Servo an Kanal 0 bewegen
-    pca.set_servo_us(0, 1000)
-    time.sleep(1)
-
-    pca.set_servo_us(0, 1500)
-    time.sleep(1)
-
-    pca.set_servo_us(0, 2000)
-    time.sleep(1)
 finally:
-    pca.close()
+    # Alle verwendeten Lichtkanäle ausschalten
+    for channel in range(NUMBER_OF_BUTTONS):
+        pca.channels[channel].duty_cycle = 0
+
+    pcf.close()
+    pca.deinit()
