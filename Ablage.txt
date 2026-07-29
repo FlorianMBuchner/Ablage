@@ -3,96 +3,222 @@ import board
 from smbus2 import SMBus
 from adafruit_pca9685 import PCA9685
 
-PCF8574_ADDRESS = 0x20
-PCF8574_BUS = 1
+I2C_BUS = 1
 
-NUMBER_OF_BUTTONS = 8
+PCF_BUTTON_ADDRESS = 0x20
+PCF_OUTPUT_ADDRESS = 0x21
+PCA9685_ADDRESS = 0x40
+
+NUMBER_OF_LIGHTS = 8
+
 HOLD_TIME = 0.5
 STEP_TIME = 0.15
 STEP_PERCENT = 5
+DEBOUNCE_TIME = 0.04
 
-# PCA9685 initialisieren
+# --------------------------------------------------
+# Hardware initialisieren
+# --------------------------------------------------
+
+bus = SMBus(I2C_BUS)
+
 i2c = board.I2C()
-pca = PCA9685(i2c, address=0x40)
+pca = PCA9685(i2c, address=PCA9685_ADDRESS)
 pca.frequency = 1000
 
-# PCF8574 initialisieren
-pcf = SMBus(PCF8574_BUS)
+# Beim Eingangs-PCF müssen alle Pins HIGH geschrieben sein,
+# damit sie als Eingänge verwendet werden können.
+bus.write_byte(PCF_BUTTON_ADDRESS, 0xFF)
 
-# Alle PCF8574-Pins auf HIGH setzen:
-# Dadurch können sie als Eingänge verwendet werden.
-pcf.write_byte(PCF8574_ADDRESS, 0xFF)
+# Ausgang ist active-low:
+# 0xFF bedeutet, dass zunächst alle Lichter ausgeschaltet sind.
+output_state = 0xFF
+bus.write_byte(PCF_OUTPUT_ADDRESS, output_state)
 
-# Für jeden Taster beziehungsweise Lichtkanal eigener Zustand
-brightness = [40] * NUMBER_OF_BUTTONS
-direction = [1] * NUMBER_OF_BUTTONS
-pressed_since = [None] * NUMBER_OF_BUTTONS
-last_step = [0.0] * NUMBER_OF_BUTTONS
+# --------------------------------------------------
+# Zustände der acht Lichtkanäle
+# --------------------------------------------------
+
+brightness = [40] * NUMBER_OF_LIGHTS
+light_on = [False] * NUMBER_OF_LIGHTS
+direction = [1] * NUMBER_OF_LIGHTS
+
+pressed_since = [None] * NUMBER_OF_LIGHTS
+last_step = [0.0] * NUMBER_OF_LIGHTS
+long_press_active = [False] * NUMBER_OF_LIGHTS
+
+# Entprellung
+raw_button_state = [False] * NUMBER_OF_LIGHTS
+stable_button_state = [False] * NUMBER_OF_LIGHTS
+last_state_change = [0.0] * NUMBER_OF_LIGHTS
 
 
-def set_brightness(channel, percent):
-    """Helligkeit eines PCA9685-Kanals einstellen."""
+def set_pwm(channel, percent):
+    """PWM-Helligkeit auf 0 bis 100 Prozent setzen."""
     percent = max(0, min(100, percent))
     duty_cycle = round(0xFFFF * percent / 100)
 
     pca.channels[channel].duty_cycle = duty_cycle
 
 
-def button_pressed(pcf_value, pin):
-    """True, wenn der active-low Taster gedrückt ist."""
+def read_button(pcf_value, pin):
+    """Active-low-Taster auswerten."""
     return (pcf_value & (1 << pin)) == 0
 
 
-# Anfangshelligkeit einstellen
-for channel in range(NUMBER_OF_BUTTONS):
-    set_brightness(channel, brightness[channel])
+def set_output(channel, enabled):
+    """
+    Active-low-Ausgang setzen.
+
+    enabled = True  -> Bit wird 0
+    enabled = False -> Bit wird 1
+    """
+    global output_state
+
+    if enabled:
+        output_state &= ~(1 << channel)
+    else:
+        output_state |= 1 << channel
+
+    bus.write_byte(PCF_OUTPUT_ADDRESS, output_state)
+
+
+def switch_light_on(channel):
+    light_on[channel] = True
+
+    # Gespeicherte Helligkeit an den PCA übertragen
+    set_pwm(channel, brightness[channel])
+
+    # Active-low-Ausgang einschalten
+    set_output(channel, True)
+
+    print(
+        f"Licht {channel}: EIN, "
+        f"Helligkeit {brightness[channel]} %"
+    )
+
+
+def switch_light_off(channel):
+    light_on[channel] = False
+
+    # PWM bleibt absichtlich unverändert
+    set_output(channel, False)
+
+    print(f"Licht {channel}: AUS")
+
+
+def toggle_light(channel):
+    if light_on[channel]:
+        switch_light_off(channel)
+    else:
+        switch_light_on(channel)
+
+
+def start_dimming(channel):
+    """Licht einschalten und Dimmvorgang starten."""
+    long_press_active[channel] = True
+    direction[channel] = 1
+
+    if not light_on[channel]:
+        switch_light_on(channel)
+
+
+def dim_one_step(channel):
+    brightness[channel] += direction[channel] * STEP_PERCENT
+
+    if brightness[channel] >= 100:
+        brightness[channel] = 100
+        direction[channel] = -1
+
+    elif brightness[channel] <= 0:
+        brightness[channel] = 0
+        direction[channel] = 1
+
+    set_pwm(channel, brightness[channel])
+
+    print(
+        f"Licht {channel}: "
+        f"{brightness[channel]} %"
+    )
+
+
+def button_pressed(channel, now):
+    """Wird einmal beim stabilen Drücken aufgerufen."""
+    pressed_since[channel] = now
+    last_step[channel] = now
+    long_press_active[channel] = False
+
+
+def button_held(channel, now):
+    """Wird aufgerufen, solange der Taster gehalten wird."""
+    if pressed_since[channel] is None:
+        return
+
+    press_duration = now - pressed_since[channel]
+
+    if press_duration < HOLD_TIME:
+        return
+
+    if not long_press_active[channel]:
+        start_dimming(channel)
+        last_step[channel] = now
+        return
+
+    if now - last_step[channel] >= STEP_TIME:
+        dim_one_step(channel)
+        last_step[channel] = now
+
+
+def button_released(channel):
+    """Kurzer Druck schaltet um; langer Druck stoppt das Dimmen."""
+    if pressed_since[channel] is None:
+        return
+
+    if not long_press_active[channel]:
+        toggle_light(channel)
+
+    pressed_since[channel] = None
+    long_press_active[channel] = False
+
+
+# Anfangshelligkeit im PCA speichern
+for channel in range(NUMBER_OF_LIGHTS):
+    set_pwm(channel, brightness[channel])
+
+# --------------------------------------------------
+# Hauptschleife
+# --------------------------------------------------
 
 try:
     while True:
         now = time.monotonic()
+        button_byte = bus.read_byte(PCF_BUTTON_ADDRESS)
 
-        # Alle acht Taster mit einem einzigen I²C-Lesezugriff einlesen
-        pcf_value = pcf.read_byte(PCF8574_ADDRESS)
+        for channel in range(NUMBER_OF_LIGHTS):
+            current_raw_state = read_button(
+                button_byte,
+                channel
+            )
 
-        for pin in range(NUMBER_OF_BUTTONS):
-            pressed = button_pressed(pcf_value, pin)
+            # Rohzustand hat sich geändert
+            if current_raw_state != raw_button_state[channel]:
+                raw_button_state[channel] = current_raw_state
+                last_state_change[channel] = now
 
-            if pressed:
-                if pressed_since[pin] is None:
-                    # Taster wurde neu gedrückt
-                    pressed_since[pin] = now
-                    last_step[pin] = now
+            # Neuen Zustand erst nach der Entprellzeit übernehmen
+            if (
+                current_raw_state != stable_button_state[channel]
+                and now - last_state_change[channel] >= DEBOUNCE_TIME
+            ):
+                stable_button_state[channel] = current_raw_state
 
-                    # Bei einem neuen Haltevorgang zunächst heller
-                    direction[pin] = 1
+                if current_raw_state:
+                    button_pressed(channel, now)
+                else:
+                    button_released(channel)
 
-                elif (
-                    now - pressed_since[pin] >= HOLD_TIME
-                    and now - last_step[pin] >= STEP_TIME
-                ):
-                    brightness[pin] += direction[pin] * STEP_PERCENT
-
-                    if brightness[pin] >= 100:
-                        brightness[pin] = 100
-                        direction[pin] = -1
-
-                    elif brightness[pin] <= 0:
-                        brightness[pin] = 0
-                        direction[pin] = 1
-
-                    # Taster-Pin entspricht hier dem Lichtkanal
-                    set_brightness(pin, brightness[pin])
-
-                    print(
-                        f"Taster {pin}: "
-                        f"Helligkeit {brightness[pin]} %"
-                    )
-
-                    last_step[pin] = now
-
-            else:
-                # Taster wurde losgelassen
-                pressed_since[pin] = None
+            if stable_button_state[channel]:
+                button_held(channel, now)
 
         time.sleep(0.01)
 
@@ -100,9 +226,9 @@ except KeyboardInterrupt:
     print("\nProgramm beendet")
 
 finally:
-    # Alle verwendeten Lichtkanäle ausschalten
-    for channel in range(NUMBER_OF_BUTTONS):
-        pca.channels[channel].duty_cycle = 0
+    # Alle active-low-Ausgänge deaktivieren
+    output_state = 0xFF
+    bus.write_byte(PCF_OUTPUT_ADDRESS, output_state)
 
-    pcf.close()
+    bus.close()
     pca.deinit()
