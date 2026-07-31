@@ -15,7 +15,7 @@
         "Normales Licht: kurzer Druck schaltet, langer Druck dimmt nur bei vorhandenem PWM-Eintrag.",
         "Rollladen: halten bedeutet Handfahrt, Doppelklick bedeutet Komplettfahrt, Druck während Automatik stoppt.",
         "Kind2-Licht auf outputs_1 Pin 1 sowie beide Bettlichter auf Pins 0/1 und PWM 6/7 bitte an der Verdrahtung prüfen.",
-        "hall_light und hall_motion sind deaktivierte Beispiele für ein Bewegungsmelder-Licht."
+        "Die drei Bewegungsmelder und ihre Lichter sind deaktivierte Beispiele mit Platzhalter-Pins. Vor dem Aktivieren reale Anschlüsse eintragen."
     ],
 
     "devices": {
@@ -129,13 +129,39 @@
             "pwm": null
         },
 
-        "hall_light_example": {
+        "motion_light_1": {
             "enabled": false,
-            "name": "Flurlicht Beispiel",
-            "room": "Flur",
+            "name": "Licht Bewegungsmelder 1",
+            "room": "Raum Bewegungsmelder 1",
             "button": null,
             "output": { "device": "outputs_5", "pin": 0 },
-            "pwm": null
+            "pwm": { "device": "pwm_1", "channel": 8 },
+            "initial_brightness": 60,
+            "motion_override": true
+        },
+
+        "motion_light_2": {
+            "enabled": false,
+            "name": "Licht Bewegungsmelder 2",
+            "room": "Raum Bewegungsmelder 2",
+            "button": null,
+            "output": { "device": "outputs_5", "pin": 1 },
+            "pwm": { "device": "pwm_1", "channel": 9 },
+            "initial_brightness": 60,
+            "motion_override": true
+        },
+
+        "motion_lights_3": {
+            "enabled": false,
+            "name": "Lichter Bewegungsmelder 3",
+            "room": "Raum Bewegungsmelder 3",
+            "button": null,
+            "outputs": [
+                { "device": "outputs_5", "pin": 2 },
+                { "device": "outputs_5", "pin": 3 }
+            ],
+            "pwm": null,
+            "motion_override": true
         }
     },
 
@@ -229,13 +255,37 @@
     },
 
     "motion_sensors": {
-        "hall_motion_example": {
+        "motion_sensor_1": {
             "enabled": false,
-            "name": "Bewegungsmelder Flur Beispiel",
-            "room": "Flur",
+            "name": "Bewegungsmelder 1",
+            "room": "Raum Bewegungsmelder 1",
             "input": { "device": "inputs_5", "pin": 0 },
             "active_low": false,
-            "target": "hall_light_example",
+            "target": "motion_light_1",
+            "on_time_seconds": 180,
+            "retrigger": true,
+            "allow_forced_on": true
+        },
+
+        "motion_sensor_2": {
+            "enabled": false,
+            "name": "Bewegungsmelder 2",
+            "room": "Raum Bewegungsmelder 2",
+            "input": { "device": "inputs_5", "pin": 1 },
+            "active_low": false,
+            "target": "motion_light_2",
+            "on_time_seconds": 180,
+            "retrigger": true,
+            "allow_forced_on": true
+        },
+
+        "motion_sensor_3": {
+            "enabled": false,
+            "name": "Bewegungsmelder 3",
+            "room": "Raum Bewegungsmelder 3",
+            "input": { "device": "inputs_5", "pin": 2 },
+            "active_low": false,
+            "target": "motion_lights_3",
             "on_time_seconds": 180,
             "retrigger": true,
             "allow_forced_on": true
