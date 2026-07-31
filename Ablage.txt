@@ -1,327 +1,225 @@
 {
     "settings": {
         "i2c_bus": 1,
+        "homebridge_expose_all": true,
         "debounce_ms": 40,
         "hold_ms": 500,
         "double_click_ms": 350,
         "dim_step_ms": 150,
-        "dim_step_percent": 5
+        "dim_step_percent": 5,
+        "blind_runtime_seconds": 30,
+        "direction_change_pause_ms": 500
     },
-    "review_required": [
-        "Kind2-Licht wurde auf outputs_1 Pin 1 gelegt, weil Pin 4 bereits vom Kind1-Balkonrollladen verwendet wird.",
-        "Bettlicht links/rechts wurde auf getrennte Eingänge und Ausgänge 0/1 sowie PWM-Kanäle 6/7 gelegt.",
-        "Nicht aufgeführte Räume und Anschlüsse müssen ergänzt werden, sobald ihre reale Verdrahtung bekannt ist."
+
+    "notes": [
+        "Normales Licht: kurzer Druck schaltet, langer Druck dimmt nur bei vorhandenem PWM-Eintrag.",
+        "Rollladen: halten bedeutet Handfahrt, Doppelklick bedeutet Komplettfahrt, Druck während Automatik stoppt.",
+        "Kind2-Licht auf outputs_1 Pin 1 sowie beide Bettlichter auf Pins 0/1 und PWM 6/7 bitte an der Verdrahtung prüfen.",
+        "hall_light und hall_motion sind deaktivierte Beispiele für ein Bewegungsmelder-Licht."
     ],
+
     "devices": {
-        "inputs_1": {
-            "type": "PCF8574",
-            "address": "0x20",
-            "active_low": true
-        },
-        "inputs_2": {
-            "type": "PCF8574",
-            "address": "0x21",
-            "active_low": true
-        },
-        "inputs_3": {
-            "type": "PCF8574",
-            "address": "0x22",
-            "active_low": true
-        },
-        "inputs_4": {
-            "type": "PCF8574",
-            "address": "0x23",
-            "active_low": true
-        },
-        "inputs_5": {
-            "type": "PCF8574",
-            "address": "0x24",
-            "active_low": true
-        },
-        "outputs_1": {
-            "type": "PCF8574A",
-            "address": "0x38",
-            "active_low": true
-        },
-        "outputs_2": {
-            "type": "PCF8574A",
-            "address": "0x39",
-            "active_low": true
-        },
-        "outputs_3": {
-            "type": "PCF8574A",
-            "address": "0x3A",
-            "active_low": true
-        },
-        "outputs_4": {
-            "type": "PCF8574A",
-            "address": "0x3B",
-            "active_low": true
-        },
-        "outputs_5": {
-            "type": "PCF8574A",
-            "address": "0x3C",
-            "active_low": true
-        },
-        "outputs_6": {
-            "type": "PCF8574A",
-            "address": "0x3D",
-            "active_low": true
-        },
-        "outputs_7": {
-            "type": "PCF8574A",
-            "address": "0x3E",
-            "active_low": true
-        },
+        "inputs_1": { "type": "PCF8574", "address": "0x20" },
+        "inputs_2": { "type": "PCF8574", "address": "0x21" },
+        "inputs_3": { "type": "PCF8574", "address": "0x22" },
+        "inputs_4": { "type": "PCF8574", "address": "0x23" },
+        "inputs_5": { "type": "PCF8574", "address": "0x24" },
+
+        "outputs_1": { "type": "PCF8574A", "address": "0x38" },
+        "outputs_2": { "type": "PCF8574A", "address": "0x39" },
+        "outputs_3": { "type": "PCF8574A", "address": "0x3A" },
+        "outputs_4": { "type": "PCF8574A", "address": "0x3B" },
+        "outputs_5": { "type": "PCF8574A", "address": "0x3C" },
+        "outputs_6": { "type": "PCF8574A", "address": "0x3D" },
+        "outputs_7": { "type": "PCF8574A", "address": "0x3E" },
+
         "pwm_1": {
             "type": "PCA9685",
             "address": "0x40",
-            "frequency": 1000,
-            "used_channels": 12
+            "frequency": 1000
         }
     },
+
     "lights": {
         "kind1_light": {
             "name": "Deckenlicht",
             "room": "Kind1",
-            "output": {
-                "device": "outputs_1",
-                "pin": 0
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 0
-            },
+            "button": { "device": "inputs_1", "pin": 0 },
+            "output": { "device": "outputs_1", "pin": 0 },
+            "pwm": { "device": "pwm_1", "channel": 0 },
             "initial_brightness": 40
         },
+
         "kind2_light": {
             "name": "Deckenlicht",
             "room": "Kind2",
-            "output": {
-                "device": "outputs_1",
-                "pin": 1
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 1
-            },
+            "button": { "device": "inputs_1", "pin": 4 },
+            "output": { "device": "outputs_1", "pin": 1 },
+            "pwm": { "device": "pwm_1", "channel": 1 },
             "initial_brightness": 40
         },
+
         "kinderbad_light": {
             "name": "Deckenlicht",
             "room": "Kinderbad",
-            "output": {
-                "device": "outputs_2",
-                "pin": 0
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 2
-            },
+            "button": { "device": "inputs_2", "pin": 0 },
+            "output": { "device": "outputs_2", "pin": 0 },
+            "pwm": { "device": "pwm_1", "channel": 2 },
             "initial_brightness": 40
         },
+
         "bad_light": {
             "name": "Deckenlicht",
             "room": "Bad",
-            "output": {
-                "device": "outputs_2",
-                "pin": 4
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 3
-            },
+            "button": { "device": "inputs_2", "pin": 4 },
+            "output": { "device": "outputs_2", "pin": 4 },
+            "pwm": { "device": "pwm_1", "channel": 3 },
             "initial_brightness": 40
         },
+
         "schlafzimmer_light": {
             "name": "Deckenlicht",
             "room": "Schlafzimmer",
-            "output": {
-                "device": "outputs_3",
-                "pin": 0
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 4
-            },
+            "button": { "device": "inputs_3", "pin": 0 },
+            "output": { "device": "outputs_3", "pin": 0 },
+            "pwm": { "device": "pwm_1", "channel": 4 },
             "initial_brightness": 40
         },
+
         "ankleide_light": {
             "name": "Deckenlicht",
             "room": "Ankleide",
-            "output": {
-                "device": "outputs_3",
-                "pin": 5
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 5
-            },
+            "button": { "device": "inputs_3", "pin": 5 },
+            "output": { "device": "outputs_3", "pin": 5 },
+            "pwm": { "device": "pwm_1", "channel": 5 },
             "initial_brightness": 40
         },
+
         "bett_light_left": {
             "name": "Bettlicht links",
             "room": "Schlafzimmer",
-            "output": {
-                "device": "outputs_4",
-                "pin": 0
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 6
-            },
+            "button": { "device": "inputs_4", "pin": 0 },
+            "output": { "device": "outputs_4", "pin": 0 },
+            "pwm": { "device": "pwm_1", "channel": 6 },
             "initial_brightness": 40
         },
+
         "bett_light_right": {
             "name": "Bettlicht rechts",
             "room": "Schlafzimmer",
-            "output": {
-                "device": "outputs_4",
-                "pin": 1
-            },
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 7
-            },
+            "button": { "device": "inputs_4", "pin": 1 },
+            "output": { "device": "outputs_4", "pin": 1 },
+            "pwm": { "device": "pwm_1", "channel": 7 },
             "initial_brightness": 40
         },
+
         "bett_lamp_left": {
             "name": "Bettlampe links",
             "room": "Schlafzimmer",
-            "output": {
-                "device": "outputs_4",
-                "pin": 2
-            },
+            "button": { "device": "inputs_4", "pin": 2 },
+            "output": { "device": "outputs_4", "pin": 2 },
             "pwm": null
         },
+
         "bett_lamp_right": {
             "name": "Bettlampe rechts",
             "room": "Schlafzimmer",
-            "output": {
-                "device": "outputs_4",
-                "pin": 3
-            },
+            "button": { "device": "inputs_4", "pin": 3 },
+            "output": { "device": "outputs_4", "pin": 3 },
+            "pwm": null
+        },
+
+        "hall_light_example": {
+            "enabled": false,
+            "name": "Flurlicht Beispiel",
+            "room": "Flur",
+            "button": null,
+            "output": { "device": "outputs_5", "pin": 0 },
             "pwm": null
         }
     },
+
     "blinds": {
         "kind1_bed_blind": {
             "name": "Rollladen Bett",
             "room": "Kind1",
-            "output_up": {
-                "device": "outputs_1",
-                "pin": 2
-            },
-            "output_down": {
-                "device": "outputs_1",
-                "pin": 3
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": null,
+            "button_down": null,
+            "output_up": { "device": "outputs_1", "pin": 2 },
+            "output_down": { "device": "outputs_1", "pin": 3 }
         },
+
         "kind1_balcony_blind": {
             "name": "Rollladen Balkon",
             "room": "Kind1",
-            "output_up": {
-                "device": "outputs_1",
-                "pin": 4
-            },
-            "output_down": {
-                "device": "outputs_1",
-                "pin": 5
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": null,
+            "button_down": null,
+            "output_up": { "device": "outputs_1", "pin": 4 },
+            "output_down": { "device": "outputs_1", "pin": 5 }
         },
+
         "kind2_blind": {
             "name": "Rollladen",
             "room": "Kind2",
-            "output_up": {
-                "device": "outputs_1",
-                "pin": 6
-            },
-            "output_down": {
-                "device": "outputs_1",
-                "pin": 7
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": { "device": "inputs_1", "pin": 6 },
+            "button_down": { "device": "inputs_1", "pin": 7 },
+            "output_up": { "device": "outputs_1", "pin": 6 },
+            "output_down": { "device": "outputs_1", "pin": 7 }
         },
+
         "kinderbad_blind": {
             "name": "Rollladen",
             "room": "Kinderbad",
-            "output_up": {
-                "device": "outputs_2",
-                "pin": 2
-            },
-            "output_down": {
-                "device": "outputs_2",
-                "pin": 3
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": { "device": "inputs_2", "pin": 2 },
+            "button_down": { "device": "inputs_2", "pin": 3 },
+            "output_up": { "device": "outputs_2", "pin": 2 },
+            "output_down": { "device": "outputs_2", "pin": 3 }
         },
+
         "bad_blind": {
             "name": "Rollladen",
             "room": "Bad",
-            "output_up": {
-                "device": "outputs_2",
-                "pin": 6
-            },
-            "output_down": {
-                "device": "outputs_2",
-                "pin": 7
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": { "device": "inputs_2", "pin": 6 },
+            "button_down": { "device": "inputs_2", "pin": 7 },
+            "output_up": { "device": "outputs_2", "pin": 6 },
+            "output_down": { "device": "outputs_2", "pin": 7 }
         },
+
         "schlafzimmer_blind": {
             "name": "Rollladen",
             "room": "Schlafzimmer",
-            "output_up": {
-                "device": "outputs_3",
-                "pin": 1
-            },
-            "output_down": {
-                "device": "outputs_3",
-                "pin": 2
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": { "device": "inputs_3", "pin": 1 },
+            "button_down": { "device": "inputs_3", "pin": 2 },
+            "output_up": { "device": "outputs_3", "pin": 1 },
+            "output_down": { "device": "outputs_3", "pin": 2 }
         },
+
         "balcony_blind": {
             "name": "Rollladen",
             "room": "Balkon",
-            "output_up": {
-                "device": "outputs_3",
-                "pin": 3
-            },
-            "output_down": {
-                "device": "outputs_3",
-                "pin": 4
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": { "device": "inputs_3", "pin": 3 },
+            "button_down": { "device": "inputs_3", "pin": 4 },
+            "output_up": { "device": "outputs_3", "pin": 3 },
+            "output_down": { "device": "outputs_3", "pin": 4 }
         },
+
         "ankleide_blind": {
             "name": "Rollladen",
             "room": "Ankleide",
-            "output_up": {
-                "device": "outputs_3",
-                "pin": 6
-            },
-            "output_down": {
-                "device": "outputs_3",
-                "pin": 7
-            },
-            "max_runtime_seconds": 30,
-            "direction_change_pause_ms": 500
+            "button_up": { "device": "inputs_3", "pin": 6 },
+            "button_down": { "device": "inputs_3", "pin": 7 },
+            "output_up": { "device": "outputs_3", "pin": 6 },
+            "output_down": { "device": "outputs_3", "pin": 7 }
         }
     },
+
     "blind_selectors": {
         "kind1_blind_selector": {
             "name": "Rollladenauswahl Kind1",
             "room": "Kind1",
+            "select_button": { "device": "inputs_1", "pin": 1 },
+            "button_up": { "device": "inputs_1", "pin": 2 },
+            "button_down": { "device": "inputs_1", "pin": 3 },
             "members": [
                 "kind1_bed_blind",
                 "kind1_balcony_blind"
@@ -329,342 +227,18 @@
             "initial_selection": "kind1_bed_blind"
         }
     },
-    "buttons": {
-        "kind1_light_button": {
-            "name": "Licht",
-            "room": "Kind1",
-            "input": {
-                "device": "inputs_1",
-                "pin": 0
-            },
-            "target": "kind1_light",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "kind1_blind_select_button": {
-            "name": "Rollladen umschalten",
-            "room": "Kind1",
-            "input": {
-                "device": "inputs_1",
-                "pin": 1
-            },
-            "target": "kind1_blind_selector",
-            "actions": {
-                "press": "select_next"
-            }
-        },
-        "kind1_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Kind1",
-            "input": {
-                "device": "inputs_1",
-                "pin": 2
-            },
-            "target": "kind1_blind_selector",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "kind1_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Kind1",
-            "input": {
-                "device": "inputs_1",
-                "pin": 3
-            },
-            "target": "kind1_blind_selector",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "kind2_light_button": {
-            "name": "Licht",
-            "room": "Kind2",
-            "input": {
-                "device": "inputs_1",
-                "pin": 4
-            },
-            "target": "kind2_light",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "kind2_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Kind2",
-            "input": {
-                "device": "inputs_1",
-                "pin": 6
-            },
-            "target": "kind2_blind",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "kind2_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Kind2",
-            "input": {
-                "device": "inputs_1",
-                "pin": 7
-            },
-            "target": "kind2_blind",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "kinderbad_light_button": {
-            "name": "Licht",
-            "room": "Kinderbad",
-            "input": {
-                "device": "inputs_2",
-                "pin": 0
-            },
-            "target": "kinderbad_light",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "kinderbad_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Kinderbad",
-            "input": {
-                "device": "inputs_2",
-                "pin": 2
-            },
-            "target": "kinderbad_blind",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "kinderbad_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Kinderbad",
-            "input": {
-                "device": "inputs_2",
-                "pin": 3
-            },
-            "target": "kinderbad_blind",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "bad_light_button": {
-            "name": "Licht",
-            "room": "Bad",
-            "input": {
-                "device": "inputs_2",
-                "pin": 4
-            },
-            "target": "bad_light",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "bad_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Bad",
-            "input": {
-                "device": "inputs_2",
-                "pin": 6
-            },
-            "target": "bad_blind",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "bad_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Bad",
-            "input": {
-                "device": "inputs_2",
-                "pin": 7
-            },
-            "target": "bad_blind",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "schlafzimmer_light_button": {
-            "name": "Licht",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_3",
-                "pin": 0
-            },
-            "target": "schlafzimmer_light",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "schlafzimmer_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_3",
-                "pin": 1
-            },
-            "target": "schlafzimmer_blind",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "schlafzimmer_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_3",
-                "pin": 2
-            },
-            "target": "schlafzimmer_blind",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "balcony_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Balkon",
-            "input": {
-                "device": "inputs_3",
-                "pin": 3
-            },
-            "target": "balcony_blind",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "balcony_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Balkon",
-            "input": {
-                "device": "inputs_3",
-                "pin": 4
-            },
-            "target": "balcony_blind",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "ankleide_light_button": {
-            "name": "Licht",
-            "room": "Ankleide",
-            "input": {
-                "device": "inputs_3",
-                "pin": 5
-            },
-            "target": "ankleide_light",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "ankleide_blind_up_button": {
-            "name": "Rollladen auf",
-            "room": "Ankleide",
-            "input": {
-                "device": "inputs_3",
-                "pin": 6
-            },
-            "target": "ankleide_blind",
-            "actions": {
-                "press": "blind_manual_up",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_up"
-            }
-        },
-        "ankleide_blind_down_button": {
-            "name": "Rollladen ab",
-            "room": "Ankleide",
-            "input": {
-                "device": "inputs_3",
-                "pin": 7
-            },
-            "target": "ankleide_blind",
-            "actions": {
-                "press": "blind_manual_down",
-                "release": "blind_manual_stop",
-                "double_press": "blind_full_down"
-            }
-        },
-        "bett_light_left_button": {
-            "name": "Bettlicht links",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_4",
-                "pin": 0
-            },
-            "target": "bett_light_left",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "bett_light_right_button": {
-            "name": "Bettlicht rechts",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_4",
-                "pin": 1
-            },
-            "target": "bett_light_right",
-            "actions": {
-                "short_press": "toggle",
-                "long_press": "dim"
-            }
-        },
-        "bett_lamp_left_button": {
-            "name": "Bettlampe links",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_4",
-                "pin": 2
-            },
-            "target": "bett_lamp_left",
-            "actions": {
-                "short_press": "toggle"
-            }
-        },
-        "bett_lamp_right_button": {
-            "name": "Bettlampe rechts",
-            "room": "Schlafzimmer",
-            "input": {
-                "device": "inputs_4",
-                "pin": 3
-            },
-            "target": "bett_lamp_right",
-            "actions": {
-                "short_press": "toggle"
-            }
+
+    "motion_sensors": {
+        "hall_motion_example": {
+            "enabled": false,
+            "name": "Bewegungsmelder Flur Beispiel",
+            "room": "Flur",
+            "input": { "device": "inputs_5", "pin": 0 },
+            "active_low": false,
+            "target": "hall_light_example",
+            "on_time_seconds": 180,
+            "retrigger": true,
+            "allow_forced_on": true
         }
     }
 }
