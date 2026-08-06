@@ -1,469 +1,288 @@
-{
-    "settings": {
-        "i2c_bus": 1,
-        "homebridge_expose_all": true,
-        "debounce_ms": 40,
-        "hold_ms": 500,
-        "double_click_ms": 350,
-        "dim_step_ms": 150,
-        "dim_step_percent": 5,
-        "default_brightness": 40,
-        "motion_on_time_seconds": 180,
-        "motion_active_low": null,
-        "blind_runtime_seconds": 30,
-        "direction_change_pause_ms": 500
-    },
+class ButtonController:
+    def __init__(
+        self,
+        config,
+        input_manager,
+        light_controller,
+        blind_controller,
+    ):
+        self._inputs = input_manager
+        self._lights = light_controller
+        self._blinds = blind_controller
 
-    "notes": [
-        "Quelle der Belegung: Belegung(1).xlsx.",
-        "0x20 bis 0x24 sind Eingangs-PCF8574, 0x38 bis 0x3E sind Ausgangs-PCF8574A.",
-        "motion_active_low muss nach dem Hardwaretest auf true oder false gesetzt werden.",
-        "Treppenhaus-Hängelampe und -Deckenlampe sind getrennt verdrahtet, werden softwareseitig aber immer gemeinsam geschaltet.",
-        "Lichter und Rollläden werden standardmäßig in Homebridge veröffentlicht."
-    ],
+        settings = config["settings"]
 
-    "devices": {
-        "inputs_1": { "type": "PCF8574", "address": "0x20", "active_low": true },
-        "inputs_2": { "type": "PCF8574", "address": "0x21", "active_low": true },
-        "inputs_3": { "type": "PCF8574", "address": "0x22", "active_low": true },
-        "inputs_4": { "type": "PCF8574", "address": "0x23", "active_low": true },
-        "inputs_5": { "type": "PCF8574", "address": "0x24", "active_low": true },
+        self._debounce_time = settings["debounce_ms"] / 1000
+        self._hold_time = settings["hold_ms"] / 1000
+        self._double_click_time = settings["double_click_ms"] / 1000
+        self._dim_step_time = settings["dim_step_ms"] / 1000
+        self._dim_step_percent = settings["dim_step_percent"]
 
-        "outputs_1": { "type": "PCF8574A", "address": "0x38", "active_low": true },
-        "outputs_2": { "type": "PCF8574A", "address": "0x39", "active_low": true },
-        "outputs_3": { "type": "PCF8574A", "address": "0x3A", "active_low": true },
-        "outputs_4": { "type": "PCF8574A", "address": "0x3B", "active_low": true },
-        "outputs_5": { "type": "PCF8574A", "address": "0x3C", "active_low": true },
-        "outputs_6": { "type": "PCF8574A", "address": "0x3D", "active_low": true },
-        "outputs_7": { "type": "PCF8574A", "address": "0x3E", "active_low": true },
+        self._buttons = {}
+        self._states = {}
+        self._blind_buttons = {}
+        self._blind_states = {}
+        self._blind_automatic = {}
 
-        "pwm_1": {
-            "type": "PCA9685",
-            "address": "0x40",
-            "frequency": 1000
-        }
-    },
+        self._load_light_buttons(config)
+        self._load_blind_buttons(config)
 
-    "lights": {
-        "kind1_light": {
-            "name": "Licht Kind 1",
-            "room": "Kind 1",
-            "button": {
-                "device": "inputs_1",
-                "pin": 0
-            },
-            "outputs": [
-                { "device": "outputs_1", "pin": 0 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 0
+    def _load_light_buttons(self, config):
+        """Alle Lichttaster aus der Konfiguration laden."""
+        for light_id, light in config["lights"].items():
+            button = light.get("button")
+
+            if button is None:
+                continue
+
+            self._buttons[light_id] = {
+                "device": button["device"],
+                "pin": button["pin"],
             }
-        },
 
-        "kind2_light": {
-            "name": "Licht Kind 2",
-            "room": "Kind 2",
-            "button": {
-                "device": "inputs_1",
-                "pin": 6
-            },
-            "outputs": [
-                { "device": "outputs_1", "pin": 6 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 1
+            self._states[light_id] = {
+                "raw_pressed": False,
+                "stable_pressed": False,
+                "raw_changed_at": 0.0,
+                "pressed_at": None,
+                "long_press_active": False,
+                "last_dim_step": 0.0,
+                "dim_direction": 1,
             }
-        },
 
-        "kinderbad_light": {
-            "name": "Licht Kinderbad",
-            "room": "Kinderbad",
-            "button": {
-                "device": "inputs_2",
-                "pin": 2
-            },
-            "outputs": [
-                { "device": "outputs_2", "pin": 2 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 2
-            }
-        },
+    def _load_blind_buttons(self, config):
+        """Direkt zugeordnete Rollladentaster laden."""
+        for blind_id, blind in config["blinds"].items():
+            self._blind_automatic[blind_id] = False
 
-        "schlafzimmer_light": {
-            "name": "Licht Schlafzimmer",
-            "room": "Schlafzimmer",
-            "button": {
-                "device": "inputs_2",
-                "pin": 6
-            },
-            "outputs": [
-                { "device": "outputs_2", "pin": 6 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 3
-            }
-        },
+            for direction, config_key in (
+                ("up", "button_up"),
+                ("down", "button_down"),
+            ):
+                button = blind.get(config_key)
 
-        "ankleide_light": {
-            "name": "Licht Ankleide",
-            "room": "Ankleide",
-            "button": {
-                "device": "inputs_2",
-                "pin": 7
-            },
-            "outputs": [
-                { "device": "outputs_2", "pin": 7 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 4
-            }
-        },
+                if button is None:
+                    continue
 
-        "bed_left_light": {
-            "name": "Bettlicht links",
-            "room": "Schlafzimmer",
-            "button": {
-                "device": "inputs_3",
-                "pin": 6
-            },
-            "outputs": [
-                { "device": "outputs_3", "pin": 6 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 5
-            }
-        },
+                button_id = f"{blind_id}:{direction}"
 
-        "bed_left_lamp": {
-            "name": "Nachttischlampe links",
-            "room": "Schlafzimmer",
-            "button": {
-                "device": "inputs_3",
-                "pin": 7
-            },
-            "outputs": [
-                { "device": "outputs_3", "pin": 7 }
-            ]
-        },
+                self._blind_buttons[button_id] = {
+                    "blind_id": blind_id,
+                    "direction": direction,
+                    "device": button["device"],
+                    "pin": button["pin"],
+                }
 
-        "bed_right_light": {
-            "name": "Bettlicht rechts",
-            "room": "Schlafzimmer",
-            "button": {
-                "device": "inputs_4",
-                "pin": 0
-            },
-            "outputs": [
-                { "device": "outputs_4", "pin": 0 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 6
-            }
-        },
+                self._blind_states[button_id] = {
+                    "raw_pressed": False,
+                    "stable_pressed": False,
+                    "raw_changed_at": 0.0,
+                    "last_click_at": None,
+                    "double_click": False,
+                    "stop_only": False,
+                }
 
-        "bed_right_lamp": {
-            "name": "Nachttischlampe rechts",
-            "room": "Schlafzimmer",
-            "button": {
-                "device": "inputs_4",
-                "pin": 1
-            },
-            "outputs": [
-                { "device": "outputs_4", "pin": 1 }
-            ]
-        },
+    def update(self, now):
+        """Alle Licht- und Rollladentaster auswerten."""
+        self._update_light_buttons(now)
+        self._update_blind_buttons(now)
 
-        "bad_light": {
-            "name": "Licht Bad",
-            "room": "Bad",
-            "button": {
-                "device": "inputs_4",
-                "pin": 2
-            },
-            "outputs": [
-                { "device": "outputs_4", "pin": 2 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 7
-            }
-        },
+    def _update_light_buttons(self, now):
+        for light_id, button in self._buttons.items():
+            pressed = self._inputs.is_pressed(
+                button["device"],
+                button["pin"],
+            )
 
-        "guest_wc_light": {
-            "name": "Licht Gäste-WC",
-            "room": "Gäste WC",
-            "button": {
-                "device": "inputs_4",
-                "pin": 6
-            },
-            "outputs": [
-                { "device": "outputs_4", "pin": 6 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 8
-            }
-        },
+            if pressed is None:
+                continue
 
-        "living_room_pendant": {
-            "name": "Hängelampe Wohnzimmer",
-            "room": "Wohnzimmer",
-            "button": {
-                "device": "inputs_5",
-                "pin": 2
-            },
-            "outputs": [
-                { "device": "outputs_5", "pin": 2 }
-            ]
-        },
+            state = self._states[light_id]
+            self._update_raw_state(state, pressed, now)
+            self._update_stable_state(light_id, state, now)
 
-        "living_room_wall_lights": {
-            "name": "4 Wandlampen Wohnzimmer",
-            "room": "Wohnzimmer",
-            "outputs": [
-                { "device": "outputs_5", "pin": 6 }
-            ],
-            "electrically_connected": true
-        },
+            if state["stable_pressed"]:
+                self._while_pressed(light_id, state, now)
 
-        "living_room_beam_led": {
-            "name": "Fachwerkbinder LED",
-            "room": "Wohnzimmer",
-            "outputs": [
-                { "device": "outputs_5", "pin": 7 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 9
-            }
-        },
+    def _update_blind_buttons(self, now):
+        for blind_id, automatic in self._blind_automatic.items():
+            if automatic and not self._blinds.is_moving(blind_id):
+                self._blind_automatic[blind_id] = False
 
-        "hallway_rooms_light": {
-            "name": "Licht Flur vor Zimmer",
-            "room": "Flur vor Zimmer",
-            "outputs": [
-                { "device": "outputs_6", "pin": 0 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 10
-            },
-            "motion_override": true
-        },
+        for button_id, button in self._blind_buttons.items():
+            pressed = self._inputs.is_pressed(
+                button["device"],
+                button["pin"],
+            )
 
-        "pantry_light": {
-            "name": "Licht Speis",
-            "room": "Speis",
-            "outputs": [
-                { "device": "outputs_6", "pin": 1 }
-            ],
-            "pwm": {
-                "device": "pwm_1",
-                "channel": 11
-            },
-            "motion_override": true
-        },
+            if pressed is None:
+                continue
 
-        "stairwell_lights": {
-            "name": "Lichter Treppenhaus",
-            "room": "Treppenhaus",
-            "outputs": [
-                { "device": "outputs_6", "pin": 2 },
-                { "device": "outputs_6", "pin": 3 }
-            ],
-            "electrically_connected": false,
-            "motion_override": true
-        },
+            state = self._blind_states[button_id]
 
-        "gallery_pendants": {
-            "name": "3 Hängelampen Galerie",
-            "room": "Galerie",
-            "outputs": [
-                { "device": "outputs_6", "pin": 4 }
-            ],
-            "electrically_connected": true
-        },
+            if pressed != state["raw_pressed"]:
+                state["raw_pressed"] = pressed
+                state["raw_changed_at"] = now
 
-        "first_hall_pendants": {
-            "name": "4 Hängelampen Flur First",
-            "room": "Flur (First)",
-            "outputs": [
-                { "device": "outputs_6", "pin": 5 }
-            ],
-            "electrically_connected": true
-        },
+            if state["raw_pressed"] == state["stable_pressed"]:
+                continue
 
-        "dining_room_pendant": {
-            "name": "Hängelampe Esszimmer",
-            "room": "Esszimmer",
-            "outputs": [
-                { "device": "outputs_6", "pin": 6 }
-            ]
-        },
+            if now - state["raw_changed_at"] < self._debounce_time:
+                continue
 
-        "kitchen_pendants": {
-            "name": "3 Hängelampen Küche",
-            "room": "Küche",
-            "outputs": [
-                { "device": "outputs_7", "pin": 1 }
-            ],
-            "electrically_connected": true,
-            "external_control": "230V"
-        },
+            state["stable_pressed"] = state["raw_pressed"]
 
-        "kitchen_work_light": {
-            "name": "Arbeitslicht LED Küche",
-            "room": "Küche",
-            "outputs": [
-                { "device": "outputs_7", "pin": 4 }
-            ],
-            "external_control": "230V"
-        },
+            if state["stable_pressed"]:
+                self._on_blind_press(button, state, now)
+            else:
+                self._on_blind_release(button, state, now)
 
-        "kitchen_ambient_light": {
-            "name": "Ambiente LED Küche",
-            "room": "Küche",
-            "outputs": [
-                { "device": "outputs_7", "pin": 5 }
-            ]
-        }
-    },
+    def _on_blind_press(self, button, state, now):
+        blind_id = button["blind_id"]
+        direction = button["direction"]
 
-    "blinds": {
-        "kind1_bed_blind": {
-            "name": "Rollladen Bett Kind 1",
-            "room": "Kind 1",
-            "output_up": { "device": "outputs_1", "pin": 2 },
-            "output_down": { "device": "outputs_1", "pin": 3 }
-        },
-        "kind1_balcony_blind": {
-            "name": "Rollladen Balkon Kind 1",
-            "room": "Kind 1",
-            "output_up": { "device": "outputs_1", "pin": 4 },
-            "output_down": { "device": "outputs_1", "pin": 5 }
-        },
-        "kind2_blind": {
-            "name": "Rollladen Kind 2",
-            "room": "Kind 2",
-            "button_up": { "device": "inputs_2", "pin": 0 },
-            "button_down": { "device": "inputs_2", "pin": 1 },
-            "output_up": { "device": "outputs_2", "pin": 0 },
-            "output_down": { "device": "outputs_2", "pin": 1 }
-        },
-        "kinderbad_blind": {
-            "name": "Rollladen Kinderbad",
-            "room": "Kinderbad",
-            "button_up": { "device": "inputs_2", "pin": 4 },
-            "button_down": { "device": "inputs_2", "pin": 5 },
-            "output_up": { "device": "outputs_2", "pin": 4 },
-            "output_down": { "device": "outputs_2", "pin": 5 }
-        },
-        "bedroom_balcony_blind": {
-            "name": "Rollladen Schlafzimmer Balkon",
-            "room": "Schlafzimmer",
-            "button_up": { "device": "inputs_3", "pin": 0 },
-            "button_down": { "device": "inputs_3", "pin": 1 },
-            "output_up": { "device": "outputs_3", "pin": 0 },
-            "output_down": { "device": "outputs_3", "pin": 1 }
-        },
-        "bedroom_bed_blind": {
-            "name": "Rollladen Schlafzimmer Bett",
-            "room": "Schlafzimmer",
-            "button_up": { "device": "inputs_3", "pin": 2 },
-            "button_down": { "device": "inputs_3", "pin": 3 },
-            "output_up": { "device": "outputs_3", "pin": 2 },
-            "output_down": { "device": "outputs_3", "pin": 3 }
-        },
-        "wardrobe_blind": {
-            "name": "Rollladen Ankleide",
-            "room": "Ankleide",
-            "button_up": { "device": "inputs_3", "pin": 4 },
-            "button_down": { "device": "inputs_3", "pin": 5 },
-            "output_up": { "device": "outputs_3", "pin": 4 },
-            "output_down": { "device": "outputs_3", "pin": 5 }
-        },
-        "bad_blind": {
-            "name": "Rollladen Bad",
-            "room": "Bad",
-            "button_up": { "device": "inputs_4", "pin": 4 },
-            "button_down": { "device": "inputs_4", "pin": 5 },
-            "output_up": { "device": "outputs_4", "pin": 4 },
-            "output_down": { "device": "outputs_4", "pin": 5 }
-        },
-        "guest_wc_blind": {
-            "name": "Rollladen Gäste-WC",
-            "room": "Gäste WC",
-            "button_up": { "device": "inputs_5", "pin": 0 },
-            "button_down": { "device": "inputs_5", "pin": 1 },
-            "output_up": { "device": "outputs_5", "pin": 0 },
-            "output_down": { "device": "outputs_5", "pin": 1 }
-        },
-        "living_room_blind": {
-            "name": "Rollladen Wohnzimmer",
-            "room": "Wohnzimmer",
-            "button_up": { "device": "inputs_5", "pin": 4 },
-            "button_down": { "device": "inputs_5", "pin": 5 },
-            "output_up": { "device": "outputs_5", "pin": 4 },
-            "output_down": { "device": "outputs_5", "pin": 5 }
-        },
-        "dining_room_blind": {
-            "name": "Rollladen Esszimmer",
-            "room": "Esszimmer",
-            "output_up": { "device": "outputs_6", "pin": 7 },
-            "output_down": { "device": "outputs_7", "pin": 0 }
-        },
-        "kitchen_blind": {
-            "name": "Rollladen Küche",
-            "room": "Küche",
-            "output_up": { "device": "outputs_7", "pin": 2 },
-            "output_down": { "device": "outputs_7", "pin": 3 }
-        }
-    },
+        state["stop_only"] = False
+        state["double_click"] = False
 
-    "blind_selectors": {
-        "kind1_blind_selector": {
-            "name": "Rollladenauswahl Kind 1",
-            "room": "Kind 1",
-            "select_button": { "device": "inputs_1", "pin": 1 },
-            "button_up": { "device": "inputs_1", "pin": 2 },
-            "button_down": { "device": "inputs_1", "pin": 3 },
-            "members": [
-                "kind1_bed_blind",
-                "kind1_balcony_blind"
-            ],
-            "initial_selection": "kind1_bed_blind"
-        }
-    },
+        if self._blind_automatic[blind_id]:
+            self._blinds.stop(blind_id)
+            self._blind_automatic[blind_id] = False
+            state["stop_only"] = True
+            self._clear_blind_clicks(blind_id)
+            return
 
-    "motion_sensors": {
-        "hallway_rooms_motion": {
-            "name": "Bewegungsmelder Flur vor Zimmer",
-            "room": "Flur vor Zimmer",
-            "input": { "device": "inputs_1", "pin": 4 },
-            "target": "hallway_rooms_light",
-            "allow_forced_on": true
-        },
-        "pantry_motion": {
-            "name": "Bewegungsmelder Speis",
-            "room": "Speis",
-            "input": { "device": "inputs_1", "pin": 5 },
-            "target": "pantry_light",
-            "allow_forced_on": true
-        },
-        "stairwell_motion": {
-            "name": "Bewegungsmelder Treppenhaus",
-            "room": "Treppenhaus",
-            "input": { "device": "inputs_5", "pin": 6 },
-            "target": "stairwell_lights",
-            "allow_forced_on": true
-        }
-    }
-}
+        last_click_at = state["last_click_at"]
+
+        if (
+            last_click_at is not None
+            and now - last_click_at <= self._double_click_time
+        ):
+            state["double_click"] = True
+
+        self._move_blind(blind_id, direction)
+
+    def _on_blind_release(self, button, state, now):
+        blind_id = button["blind_id"]
+        direction = button["direction"]
+
+        if state["stop_only"]:
+            state["stop_only"] = False
+            return
+
+        if state["double_click"]:
+            self._blind_automatic[blind_id] = True
+            state["last_click_at"] = None
+            state["double_click"] = False
+            return
+
+        if self._blinds.get_direction(blind_id) == direction:
+            self._blinds.stop(blind_id)
+
+        state["last_click_at"] = now
+
+    def _move_blind(self, blind_id, direction):
+        if direction == "up":
+            self._blinds.move_up(blind_id)
+        else:
+            self._blinds.move_down(blind_id)
+
+    def _clear_blind_clicks(self, blind_id):
+        for button_id, button in self._blind_buttons.items():
+            if button["blind_id"] != blind_id:
+                continue
+
+            state = self._blind_states[button_id]
+            state["last_click_at"] = None
+            state["double_click"] = False
+
+    def _update_raw_state(self, state, pressed, now):
+        """Elektrischen Rohzustand übernehmen."""
+        if pressed == state["raw_pressed"]:
+            return
+
+        state["raw_pressed"] = pressed
+        state["raw_changed_at"] = now
+
+    def _update_stable_state(self, light_id, state, now):
+        """Rohzustand nach der Entprellzeit übernehmen."""
+        if state["raw_pressed"] == state["stable_pressed"]:
+            return
+
+        if now - state["raw_changed_at"] < self._debounce_time:
+            return
+
+        state["stable_pressed"] = state["raw_pressed"]
+
+        if state["raw_pressed"]:
+            self._on_press(state, now)
+        else:
+            self._on_release(light_id, state)
+
+    def _on_press(self, state, now):
+        """Stabilen Lichttastendruck beginnen."""
+        state["pressed_at"] = now
+        state["long_press_active"] = False
+        state["last_dim_step"] = now
+        state["dim_direction"] = 1
+
+    def _on_release(self, light_id, state):
+        """Stabiles Loslassen eines Lichttasters auswerten."""
+        if not state["long_press_active"]:
+            self._lights.toggle(light_id)
+
+        state["pressed_at"] = None
+        state["long_press_active"] = False
+
+    def _while_pressed(self, light_id, state, now):
+        """Gehaltenen Lichttaster auswerten."""
+        if not self._lights.is_dimmable(light_id):
+            return
+
+        if state["pressed_at"] is None:
+            return
+
+        if now - state["pressed_at"] < self._hold_time:
+            return
+
+        if not state["long_press_active"]:
+            self._start_dimming(light_id, state, now)
+            return
+
+        if now - state["last_dim_step"] < self._dim_step_time:
+            return
+
+        self._dim_one_step(light_id, state)
+        state["last_dim_step"] = now
+
+    def _start_dimming(self, light_id, state, now):
+        """Langen Tastendruck und Dimmen starten."""
+        state["long_press_active"] = True
+        state["last_dim_step"] = now
+        state["dim_direction"] = 1
+
+        if not self._lights.is_on(light_id):
+            self._lights.switch_on(light_id)
+
+    def _dim_one_step(self, light_id, state):
+        """Eine Dimmstufe ausführen."""
+        brightness = self._lights.get_brightness(light_id)
+        direction = state["dim_direction"]
+
+        if brightness >= 100:
+            direction = -1
+        elif brightness <= 8:
+            direction = 1
+
+        change = direction * self._dim_step_percent
+        new_brightness = self._lights.change_brightness(
+            light_id,
+            change,
+        )
+
+        if new_brightness >= 100:
+            direction = -1
+        elif new_brightness <= 8:
+            direction = 1
+
+        state["dim_direction"] = direction
+        print(f"{light_id}: {new_brightness} %")
