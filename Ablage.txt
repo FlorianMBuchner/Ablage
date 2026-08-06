@@ -23,9 +23,13 @@ class ButtonController:
         self._blind_buttons = {}
         self._blind_states = {}
         self._blind_automatic = {}
+        self._selectors = {}
+        self._selector_buttons = {}
+        self._selector_states = {}
 
         self._load_light_buttons(config)
         self._load_blind_buttons(config)
+        self._load_blind_selectors(config)
 
     def _load_light_buttons(self, config):
         """Alle Lichttaster aus der Konfiguration laden."""
@@ -80,12 +84,119 @@ class ButtonController:
                     "last_click_at": None,
                     "double_click": False,
                     "stop_only": False,
+                    "active_blind_id": None,
+                }
+
+    def _load_blind_selectors(self, config):
+        """Umschalter und gemeinsame Auf-/Ab-Taster laden."""
+        for selector_id, selector in config[
+            "blind_selectors"
+        ].items():
+            members = selector["members"]
+            initial_selection = selector["initial_selection"]
+
+            self._selectors[selector_id] = {
+                "name": selector["name"],
+                "members": members,
+                "selected_index": members.index(initial_selection),
+            }
+
+            select_button = selector["select_button"]
+            self._selector_buttons[selector_id] = {
+                "device": select_button["device"],
+                "pin": select_button["pin"],
+            }
+            self._selector_states[selector_id] = {
+                "raw_pressed": False,
+                "stable_pressed": False,
+                "raw_changed_at": 0.0,
+            }
+
+            for direction, config_key in (
+                ("up", "button_up"),
+                ("down", "button_down"),
+            ):
+                button = selector[config_key]
+                button_id = f"selector:{selector_id}:{direction}"
+
+                self._blind_buttons[button_id] = {
+                    "selector_id": selector_id,
+                    "direction": direction,
+                    "device": button["device"],
+                    "pin": button["pin"],
+                }
+                self._blind_states[button_id] = {
+                    "raw_pressed": False,
+                    "stable_pressed": False,
+                    "raw_changed_at": 0.0,
+                    "last_click_at": None,
+                    "double_click": False,
+                    "stop_only": False,
+                    "active_blind_id": None,
                 }
 
     def update(self, now):
         """Alle Licht- und Rollladentaster auswerten."""
         self._update_light_buttons(now)
+        self._update_selector_buttons(now)
         self._update_blind_buttons(now)
+
+    def _update_selector_buttons(self, now):
+        for selector_id, button in self._selector_buttons.items():
+            pressed = self._inputs.is_pressed(
+                button["device"],
+                button["pin"],
+            )
+
+            if pressed is None:
+                continue
+
+            state = self._selector_states[selector_id]
+
+            if pressed != state["raw_pressed"]:
+                state["raw_pressed"] = pressed
+                state["raw_changed_at"] = now
+
+            if state["raw_pressed"] == state["stable_pressed"]:
+                continue
+
+            if now - state["raw_changed_at"] < self._debounce_time:
+                continue
+
+            state["stable_pressed"] = state["raw_pressed"]
+
+            if state["stable_pressed"]:
+                self._select_next_blind(selector_id)
+
+    def _select_next_blind(self, selector_id):
+        selector = self._selectors[selector_id]
+        member_count = len(selector["members"])
+
+        selector["selected_index"] = (
+            selector["selected_index"] + 1
+        ) % member_count
+
+        self._clear_selector_clicks(selector_id)
+
+        selected_blind = self._get_selected_blind(selector_id)
+        print(
+            f"{selector['name']}: "
+            f"{selected_blind} ausgewählt"
+        )
+
+    def _get_selected_blind(self, selector_id):
+        selector = self._selectors[selector_id]
+        selected_index = selector["selected_index"]
+        return selector["members"][selected_index]
+
+    def _clear_selector_clicks(self, selector_id):
+        for button_id, button in self._blind_buttons.items():
+            if button.get("selector_id") != selector_id:
+                continue
+
+            state = self._blind_states[button_id]
+            state["last_click_at"] = None
+            state["double_click"] = False
 
     def _update_light_buttons(self, now):
         for light_id, button in self._buttons.items():
@@ -138,11 +249,12 @@ class ButtonController:
                 self._on_blind_release(button, state, now)
 
     def _on_blind_press(self, button, state, now):
-        blind_id = button["blind_id"]
+        blind_id = self._resolve_blind_id(button)
         direction = button["direction"]
 
         state["stop_only"] = False
         state["double_click"] = False
+        state["active_blind_id"] = blind_id
 
         if self._blind_automatic[blind_id]:
             self._blinds.stop(blind_id)
@@ -162,23 +274,35 @@ class ButtonController:
         self._move_blind(blind_id, direction)
 
     def _on_blind_release(self, button, state, now):
-        blind_id = button["blind_id"]
+        blind_id = state["active_blind_id"]
         direction = button["direction"]
+
+        if blind_id is None:
+            return
 
         if state["stop_only"]:
             state["stop_only"] = False
+            state["active_blind_id"] = None
             return
 
         if state["double_click"]:
             self._blind_automatic[blind_id] = True
             state["last_click_at"] = None
             state["double_click"] = False
+            state["active_blind_id"] = None
             return
 
         if self._blinds.get_direction(blind_id) == direction:
             self._blinds.stop(blind_id)
 
         state["last_click_at"] = now
+        state["active_blind_id"] = None
+
+    def _resolve_blind_id(self, button):
+        if "blind_id" in button:
+            return button["blind_id"]
+
+        return self._get_selected_blind(button["selector_id"])
 
     def _move_blind(self, blind_id, direction):
         if direction == "up":
@@ -188,7 +312,14 @@ class ButtonController:
 
     def _clear_blind_clicks(self, blind_id):
         for button_id, button in self._blind_buttons.items():
-            if button["blind_id"] != blind_id:
+            if "blind_id" in button:
+                button_blind_id = button["blind_id"]
+            else:
+                button_blind_id = self._get_selected_blind(
+                    button["selector_id"]
+                )
+
+            if button_blind_id != blind_id:
                 continue
 
             state = self._blind_states[button_id]
