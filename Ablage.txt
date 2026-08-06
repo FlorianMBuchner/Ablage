@@ -1,419 +1,46 @@
-class ButtonController:
-    def __init__(
-        self,
-        config,
-        input_manager,
-        light_controller,
-        blind_controller,
-    ):
-        self._inputs = input_manager
-        self._lights = light_controller
-        self._blinds = blind_controller
+from contextlib import asynccontextmanager
 
-        settings = config["settings"]
+from fastapi import FastAPI
 
-        self._debounce_time = settings["debounce_ms"] / 1000
-        self._hold_time = settings["hold_ms"] / 1000
-        self._double_click_time = settings["double_click_ms"] / 1000
-        self._dim_step_time = settings["dim_step_ms"] / 1000
-        self._dim_step_percent = settings["dim_step_percent"]
+from api.runtime import AutomationRuntime
 
-        self._buttons = {}
-        self._states = {}
-        self._blind_buttons = {}
-        self._blind_states = {}
-        self._blind_automatic = {}
-        self._selectors = {}
-        self._selector_buttons = {}
-        self._selector_states = {}
 
-        self._load_light_buttons(config)
-        self._load_blind_buttons(config)
-        self._load_blind_selectors(config)
+runtime = AutomationRuntime("config.json")
 
-    def _load_light_buttons(self, config):
-        """Alle Lichttaster aus der Konfiguration laden."""
-        for light_id, light in config["lights"].items():
-            button = light.get("button")
 
-            if button is None:
-                continue
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    runtime.start()
 
-            self._buttons[light_id] = {
-                "device": button["device"],
-                "pin": button["pin"],
-            }
+    app.state.runtime = runtime
 
-            self._states[light_id] = {
-                "raw_pressed": False,
-                "stable_pressed": False,
-                "raw_changed_at": 0.0,
-                "pressed_at": None,
-                "long_press_active": False,
-                "last_dim_step": 0.0,
-                "dim_direction": 1,
-            }
+    try:
+        yield
+    finally:
+        runtime.stop()
 
-    def _load_blind_buttons(self, config):
-        """Direkt zugeordnete Rollladentaster laden."""
-        for blind_id, blind in config["blinds"].items():
-            self._blind_automatic[blind_id] = False
 
-            for direction, config_key in (
-                ("up", "button_up"),
-                ("down", "button_down"),
-            ):
-                button = blind.get(config_key)
+app = FastAPI(
+    title="Home Automation API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
-                if button is None:
-                    continue
 
-                button_id = f"{blind_id}:{direction}"
+@app.get("/health")
+def get_health():
+    error = runtime.get_error()
 
-                self._blind_buttons[button_id] = {
-                    "blind_id": blind_id,
-                    "direction": direction,
-                    "device": button["device"],
-                    "pin": button["pin"],
-                }
-
-                self._blind_states[button_id] = {
-                    "raw_pressed": False,
-                    "stable_pressed": False,
-                    "raw_changed_at": 0.0,
-                    "last_click_at": None,
-                    "double_click": False,
-                    "stop_only": False,
-                    "active_blind_id": None,
-                }
-
-    def _load_blind_selectors(self, config):
-        """Umschalter und gemeinsame Auf-/Ab-Taster laden."""
-        for selector_id, selector in config[
-            "blind_selectors"
-        ].items():
-            members = selector["members"]
-            initial_selection = selector["initial_selection"]
-
-            self._selectors[selector_id] = {
-                "name": selector["name"],
-                "members": members,
-                "selected_index": members.index(initial_selection),
-            }
-
-            select_button = selector["select_button"]
-            self._selector_buttons[selector_id] = {
-                "device": select_button["device"],
-                "pin": select_button["pin"],
-            }
-            self._selector_states[selector_id] = {
-                "raw_pressed": False,
-                "stable_pressed": False,
-                "raw_changed_at": 0.0,
-            }
-
-            for direction, config_key in (
-                ("up", "button_up"),
-                ("down", "button_down"),
-            ):
-                button = selector[config_key]
-                button_id = f"selector:{selector_id}:{direction}"
-
-                self._blind_buttons[button_id] = {
-                    "selector_id": selector_id,
-                    "direction": direction,
-                    "device": button["device"],
-                    "pin": button["pin"],
-                }
-                self._blind_states[button_id] = {
-                    "raw_pressed": False,
-                    "stable_pressed": False,
-                    "raw_changed_at": 0.0,
-                    "last_click_at": None,
-                    "double_click": False,
-                    "stop_only": False,
-                    "active_blind_id": None,
-                }
-
-    def update(self, now):
-        """Alle Licht- und Rollladentaster auswerten."""
-        self._update_light_buttons(now)
-        self._update_selector_buttons(now)
-        self._update_blind_buttons(now)
-
-    def _update_selector_buttons(self, now):
-        for selector_id, button in self._selector_buttons.items():
-            pressed = self._inputs.is_pressed(
-                button["device"],
-                button["pin"],
-            )
-
-            if pressed is None:
-                continue
-
-            state = self._selector_states[selector_id]
-
-            if pressed != state["raw_pressed"]:
-                state["raw_pressed"] = pressed
-                state["raw_changed_at"] = now
-
-            if state["raw_pressed"] == state["stable_pressed"]:
-                continue
-
-            if now - state["raw_changed_at"] < self._debounce_time:
-                continue
-
-            state["stable_pressed"] = state["raw_pressed"]
-
-            if state["stable_pressed"]:
-                self._select_next_blind(selector_id)
-
-    def _select_next_blind(self, selector_id):
-        selector = self._selectors[selector_id]
-        member_count = len(selector["members"])
-
-        selector["selected_index"] = (
-            selector["selected_index"] + 1
-        ) % member_count
-
-        self._clear_selector_clicks(selector_id)
-
-        selected_blind = self._get_selected_blind(selector_id)
-        print(
-            f"{selector['name']}: "
-            f"{selected_blind} ausgewählt"
-        )
-
-    def _get_selected_blind(self, selector_id):
-        selector = self._selectors[selector_id]
-        selected_index = selector["selected_index"]
-        return selector["members"][selected_index]
-
-    def _clear_selector_clicks(self, selector_id):
-        for button_id, button in self._blind_buttons.items():
-            if button.get("selector_id") != selector_id:
-                continue
-
-            state = self._blind_states[button_id]
-            state["last_click_at"] = None
-            state["double_click"] = False
-
-    def _update_light_buttons(self, now):
-        for light_id, button in self._buttons.items():
-            pressed = self._inputs.is_pressed(
-                button["device"],
-                button["pin"],
-            )
-
-            if pressed is None:
-                continue
-
-            state = self._states[light_id]
-            self._update_raw_state(state, pressed, now)
-            self._update_stable_state(light_id, state, now)
-
-            if state["stable_pressed"]:
-                self._while_pressed(light_id, state, now)
-
-    def _update_blind_buttons(self, now):
-        for blind_id, automatic in self._blind_automatic.items():
-            if automatic and not self._blinds.is_moving(blind_id):
-                self._blind_automatic[blind_id] = False
-
-        for button_id, button in self._blind_buttons.items():
-            pressed = self._inputs.is_pressed(
-                button["device"],
-                button["pin"],
-            )
-
-            if pressed is None:
-                continue
-
-            state = self._blind_states[button_id]
-
-            if pressed != state["raw_pressed"]:
-                state["raw_pressed"] = pressed
-                state["raw_changed_at"] = now
-
-            if state["raw_pressed"] == state["stable_pressed"]:
-                continue
-
-            if now - state["raw_changed_at"] < self._debounce_time:
-                continue
-
-            state["stable_pressed"] = state["raw_pressed"]
-
-            if state["stable_pressed"]:
-                self._on_blind_press(button, state, now)
-            else:
-                self._on_blind_release(button, state, now)
-
-    def _on_blind_press(self, button, state, now):
-        blind_id = self._resolve_blind_id(button)
-        direction = button["direction"]
-
-        state["stop_only"] = False
-        state["double_click"] = False
-        state["active_blind_id"] = blind_id
-
-        if self._blind_automatic[blind_id]:
-            self._blinds.stop(blind_id)
-            self._blind_automatic[blind_id] = False
-            state["stop_only"] = True
-            self._clear_blind_clicks(blind_id)
-            return
-
-        last_click_at = state["last_click_at"]
-
-        if (
-            last_click_at is not None
-            and now - last_click_at <= self._double_click_time
-        ):
-            state["double_click"] = True
-
-        self._move_blind(blind_id, direction)
-
-    def _on_blind_release(self, button, state, now):
-        blind_id = state["active_blind_id"]
-        direction = button["direction"]
-
-        if blind_id is None:
-            return
-
-        if state["stop_only"]:
-            state["stop_only"] = False
-            state["active_blind_id"] = None
-            return
-
-        if state["double_click"]:
-            self._blind_automatic[blind_id] = True
-            state["last_click_at"] = None
-            state["double_click"] = False
-            state["active_blind_id"] = None
-            return
-
-        if self._blinds.get_direction(blind_id) == direction:
-            self._blinds.stop(blind_id)
-
-        state["last_click_at"] = now
-        state["active_blind_id"] = None
-
-    def _resolve_blind_id(self, button):
-        if "blind_id" in button:
-            return button["blind_id"]
-
-        return self._get_selected_blind(button["selector_id"])
-
-    def _move_blind(self, blind_id, direction):
-        if direction == "up":
-            self._blinds.move_up(blind_id)
-        else:
-            self._blinds.move_down(blind_id)
-
-    def _clear_blind_clicks(self, blind_id):
-        for button_id, button in self._blind_buttons.items():
-            if "blind_id" in button:
-                button_blind_id = button["blind_id"]
-            else:
-                button_blind_id = self._get_selected_blind(
-                    button["selector_id"]
-                )
-
-            if button_blind_id != blind_id:
-                continue
-
-            state = self._blind_states[button_id]
-            state["last_click_at"] = None
-            state["double_click"] = False
-
-    def _update_raw_state(self, state, pressed, now):
-        """Elektrischen Rohzustand übernehmen."""
-        if pressed == state["raw_pressed"]:
-            return
-
-        state["raw_pressed"] = pressed
-        state["raw_changed_at"] = now
-
-    def _update_stable_state(self, light_id, state, now):
-        """Rohzustand nach der Entprellzeit übernehmen."""
-        if state["raw_pressed"] == state["stable_pressed"]:
-            return
-
-        if now - state["raw_changed_at"] < self._debounce_time:
-            return
-
-        state["stable_pressed"] = state["raw_pressed"]
-
-        if state["raw_pressed"]:
-            self._on_press(state, now)
-        else:
-            self._on_release(light_id, state)
-
-    def _on_press(self, state, now):
-        """Stabilen Lichttastendruck beginnen."""
-        state["pressed_at"] = now
-        state["long_press_active"] = False
-        state["last_dim_step"] = now
-        state["dim_direction"] = 1
-
-    def _on_release(self, light_id, state):
-        """Stabiles Loslassen eines Lichttasters auswerten."""
-        if not state["long_press_active"]:
-            self._lights.toggle(light_id)
-
-        state["pressed_at"] = None
-        state["long_press_active"] = False
-
-    def _while_pressed(self, light_id, state, now):
-        """Gehaltenen Lichttaster auswerten."""
-        if not self._lights.is_dimmable(light_id):
-            return
-
-        if state["pressed_at"] is None:
-            return
-
-        if now - state["pressed_at"] < self._hold_time:
-            return
-
-        if not state["long_press_active"]:
-            self._start_dimming(light_id, state, now)
-            return
-
-        if now - state["last_dim_step"] < self._dim_step_time:
-            return
-
-        self._dim_one_step(light_id, state)
-        state["last_dim_step"] = now
-
-    def _start_dimming(self, light_id, state, now):
-        """Langen Tastendruck und Dimmen starten."""
-        state["long_press_active"] = True
-        state["last_dim_step"] = now
-        state["dim_direction"] = 1
-
-        if not self._lights.is_on(light_id):
-            self._lights.switch_on(light_id)
-
-    def _dim_one_step(self, light_id, state):
-        """Eine Dimmstufe ausführen."""
-        brightness = self._lights.get_brightness(light_id)
-        direction = state["dim_direction"]
-
-        if brightness >= 100:
-            direction = -1
-        elif brightness <= 8:
-            direction = 1
-
-        change = direction * self._dim_step_percent
-        new_brightness = self._lights.change_brightness(
-            light_id,
-            change,
-        )
-
-        if new_brightness >= 100:
-            direction = -1
-        elif new_brightness <= 8:
-            direction = 1
-
-        state["dim_direction"] = direction
-        print(f"{light_id}: {new_brightness} %")
+    return {
+        "status": (
+            "ok"
+            if runtime.is_running()
+            else "error"
+        ),
+        "hardware_loop_running": runtime.is_running(),
+        "error": (
+            str(error)
+            if error is not None
+            else None
+        ),
+    }
